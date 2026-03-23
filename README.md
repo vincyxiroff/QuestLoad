@@ -42,8 +42,7 @@ Click **Connect Quest** in Step 1. Put on your headset and accept the USB debug
 In Step 2, choose an **APK** file or a **bundle folder**:
 - **APK** – click the “Choose an .apk” box and select a single `.apk` file. Drag‑and‑drop is also supported.
 - **Bundle (BETA)** – click the “Choose a game bundle folder (BETA)” box and select either:
-  - a manifest bundle containing `release.manifest`, the app’s APK, and any OBB files, or
-  - an APK + OBB bundle where the installer can infer metadata from filenames and layout, such as:
+  - a folder with one APK at the root and one package-named OBB folder, such as:
 
     ```text
     bundle/
@@ -53,7 +52,9 @@ In Step 2, choose an **APK** file or a **bundle folder**:
         └── patch.161562.com.CMGames.IntoTheRadius.obb
     ```
 
-  QuestLoad still supports existing `release.manifest` bundles, but it can now also install APK + OBB bundles without a manifest when the OBB filenames follow the standard `main|patch.<versionCode>.<packageName>.obb` format.
+  QuestLoad installs the APK first, then fully replaces `/sdcard/Android/obb/<packageName>` by deleting the existing folder, recreating it, and recursively copying the selected OBB package folder into place.
+
+  Existing `release.manifest` bundles are still accepted as a fallback, but a manifest is no longer required for normal APK + OBB installs. OBB filenames should follow the standard `main|patch.<versionCode>.<packageName>.obb` format.
 
 ### 4. Install
 Click **Install APK** for single APKs or **Install Bundle (APK + OBB)** for bundles. The log will show progress and confirm success when finished.

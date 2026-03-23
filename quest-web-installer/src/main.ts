@@ -331,7 +331,19 @@ type ParsedObbInfo = {
   kind: "main" | "patch";
   versionCode: string;
   packageName: string;
-  path: string;
+};
+
+type ResolvedObbBundle = {
+  packageName: string;
+  apkFile: File;
+  apkRelativePath: string;
+  obbRootRelativePath: string;
+  obbFiles: Array<{
+    relativePath: string;
+    remoteRelativePath: string;
+    file: File;
+  }>;
+  versionCode?: string;
 };
 
 function parseReleaseManifest(text: string): ManifestInfo {
@@ -379,84 +391,27 @@ function parseReleaseManifest(text: string): ManifestInfo {
   return { packageName, versionCode, apkPath, obbPaths };
 }
 
-function parseObbFileName(path: string): ParsedObbInfo | null {
-  const name = basename(path);
-  const match = /^(main|patch)\.(\d+)\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\.obb$/i.exec(name);
+function normalizeRelativePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
+}
+
+function getTopLevelFolder(path: string): string | null {
+  const normalized = normalizeRelativePath(path);
+  const slashIndex = normalized.indexOf("/");
+  if (slashIndex <= 0) return null;
+  return normalized.slice(0, slashIndex);
+}
+
+function parseObbFilename(name: string): ParsedObbInfo | null {
+  const fileName = basename(name);
+  const match = /^(main|patch)\.(\d+)\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\.obb$/i.exec(fileName);
   if (!match) return null;
 
   return {
     kind: match[1].toLowerCase() as "main" | "patch",
     versionCode: match[2],
     packageName: match[3],
-    path
   };
-}
-
-function inferBundleInfoFromFiles(map: Map<string, File>): ManifestInfo {
-  const parsedObbs = Array.from(map.entries())
-    .map(([path]) => parseObbFileName(path))
-    .filter((entry): entry is ParsedObbInfo => Boolean(entry));
-
-  if (!parsedObbs.length) {
-    throw new Error(
-      "Bundle is missing valid OBB files. Expected names like main.<versionCode>.<packageName>.obb or patch.<versionCode>.<packageName>.obb."
-    );
-  }
-
-  const packageNames = new Set(parsedObbs.map(entry => entry.packageName));
-  if (packageNames.size !== 1) {
-    throw new Error("Bundle OBB files refer to different package names. Keep all OBB files for the same app in one folder.");
-  }
-
-  const versionCodes = new Set(parsedObbs.map(entry => entry.versionCode));
-  if (versionCodes.size !== 1) {
-    throw new Error("Bundle OBB files refer to different version codes. Make sure the OBB files belong to the same game version.");
-  }
-
-  const seenKinds = new Set<string>();
-  for (const obb of parsedObbs) {
-    if (seenKinds.has(obb.kind)) {
-      throw new Error(`Bundle has multiple ${obb.kind} OBB files. Keep at most one main and one patch OBB per bundle.`);
-    }
-    seenKinds.add(obb.kind);
-  }
-
-  const packageName = parsedObbs[0].packageName;
-  const versionCode = parsedObbs[0].versionCode;
-  const apkCandidates = Array.from(map.entries())
-    .filter(([path]) => path.toLowerCase().endsWith(".apk"))
-    .map(([path, file]) => ({ path, file }));
-
-  if (!apkCandidates.length) {
-    throw new Error(`Bundle is missing an APK. Add ${packageName}.apk at the bundle root or inside the selected folder.`);
-  }
-
-  const exactApkMatches = apkCandidates.filter(({ path }) => basename(path).slice(0, -4) === packageName);
-  let apkPath: string;
-
-  if (exactApkMatches.length === 1) {
-    apkPath = exactApkMatches[0].path;
-  } else if (exactApkMatches.length > 1) {
-    throw new Error(`Bundle has multiple APKs named for ${packageName}. Keep only one obvious APK match in the selected folder.`);
-  } else if (apkCandidates.length === 1) {
-    apkPath = apkCandidates[0].path;
-    log(`⚠️ APK filename does not match inferred package name; using only APK found: ${apkPath}`);
-  } else {
-    throw new Error(
-      `Bundle has multiple APKs and none clearly match ${packageName}. Rename the APK to ${packageName}.apk or remove extra APKs.`
-    );
-  }
-
-  const obbPaths = parsedObbs
-    .sort((a, b) => a.kind.localeCompare(b.kind))
-    .map(entry => entry.path);
-
-  log(`Inferred bundle package: ${packageName}`);
-  log(`Inferred bundle versionCode: ${versionCode}`);
-  log(`Matched APK path: ${apkPath}`);
-  log(`Inferred OBB files: ${obbPaths.length}`);
-
-  return { packageName, versionCode, apkPath, obbPaths };
 }
 
 function buildBundleFileMap(files: FileList): Map<string, File> {
@@ -464,7 +419,7 @@ function buildBundleFileMap(files: FileList): Map<string, File> {
 
   for (const f of Array.from(files)) {
     const rel = (f as any).webkitRelativePath ? String((f as any).webkitRelativePath) : f.name;
-    const stripped = stripTopFolder(rel);
+    const stripped = normalizeRelativePath(stripTopFolder(rel));
     map.set(stripped, f);
   }
 
@@ -497,6 +452,178 @@ function resolveBundleFiles(map: Map<string, File>, info: ManifestInfo): { apkFi
   return { apkFile, obbFiles };
 }
 
+function toRemoteRelativePath(path: string, packageName: string): string {
+  const normalized = normalizeRelativePath(path);
+  const prefix = `${packageName}/`;
+  if (normalized.startsWith(prefix)) {
+    return normalizeRelativePath(normalized.slice(prefix.length));
+  }
+  return basename(normalized);
+}
+
+function resolveRookieStyleBundle(files: FileList): ResolvedObbBundle {
+  const normalizedEntries = Array.from(files).map(file => {
+    const rel = (file as any).webkitRelativePath ? String((file as any).webkitRelativePath) : file.name;
+    return {
+      file,
+      relativePath: normalizeRelativePath(stripTopFolder(rel))
+    };
+  });
+
+  const apkCandidates = normalizedEntries.filter(({ relativePath }) => {
+    return relativePath.toLowerCase().endsWith(".apk") && !relativePath.includes("/");
+  });
+  const obbCandidates = normalizedEntries.filter(({ relativePath }) => {
+    return relativePath.toLowerCase().endsWith(".obb") && relativePath.includes("/");
+  });
+
+  if (!apkCandidates.length) {
+    throw new Error("Bundle is missing an APK at the selected folder root.");
+  }
+
+  if (!obbCandidates.length) {
+    throw new Error("Bundle is missing a package-named OBB folder with at least one .obb file.");
+  }
+
+  const obbFolders = new Map<string, typeof obbCandidates>();
+  for (const entry of obbCandidates) {
+    const topLevelFolder = getTopLevelFolder(entry.relativePath);
+    if (!topLevelFolder) {
+      throw new Error(`Malformed bundle layout: OBB file must be inside a package folder (${entry.relativePath}).`);
+    }
+
+    const bucket = obbFolders.get(topLevelFolder) ?? [];
+    bucket.push(entry);
+    obbFolders.set(topLevelFolder, bucket);
+  }
+
+  if (obbFolders.size !== 1) {
+    const folderNames = Array.from(obbFolders.keys()).sort().join(", ");
+    throw new Error(
+      `Bundle must contain exactly one package-named OBB folder. Found ${obbFolders.size}: ${folderNames || "(none)"}.`
+    );
+  }
+
+  const [packageName, obbEntries] = Array.from(obbFolders.entries())[0];
+  const matchingApks = apkCandidates.filter(({ relativePath }) => basename(relativePath).slice(0, -4) === packageName);
+
+  let apkEntry: typeof apkCandidates[number] | undefined;
+  if (matchingApks.length === 1) {
+    apkEntry = matchingApks[0];
+  } else if (matchingApks.length > 1) {
+    throw new Error(`Bundle has multiple APKs matching package ${packageName}. Keep only one ${packageName}.apk at the root.`);
+  } else if (apkCandidates.length === 1) {
+    apkEntry = apkCandidates[0];
+    log(`⚠️ APK filename does not match OBB folder name; using only APK found: ${apkEntry.relativePath}`);
+  } else {
+    throw new Error(`Bundle has multiple APKs and none clearly match OBB package folder ${packageName}.`);
+  }
+
+  if (!apkEntry) {
+    throw new Error(`Bundle APK could not be resolved for package ${packageName}.`);
+  }
+
+  const parsedObbs = obbEntries.map(entry => ({
+    entry,
+    parsed: parseObbFilename(entry.relativePath)
+  }));
+
+  const invalidObb = parsedObbs.find(({ parsed }) => !parsed);
+  if (invalidObb) {
+    throw new Error(
+      `OBB filename package mismatch or invalid name: ${basename(invalidObb.entry.relativePath)}. Expected main|patch.<versionCode>.<packageName>.obb.`
+    );
+  }
+
+  const versionCodes = new Set<string>();
+  const seenKinds = new Set<string>();
+  for (const { entry, parsed } of parsedObbs as Array<{ entry: typeof obbEntries[number]; parsed: ParsedObbInfo }>) {
+    if (parsed.packageName !== packageName) {
+      throw new Error(
+        `OBB filename package mismatch: ${basename(entry.relativePath)} points to ${parsed.packageName}, expected ${packageName}.`
+      );
+    }
+
+    if (seenKinds.has(parsed.kind)) {
+      throw new Error(`Bundle has multiple ${parsed.kind} OBB files. Keep at most one main and one patch OBB per bundle.`);
+    }
+
+    seenKinds.add(parsed.kind);
+    versionCodes.add(parsed.versionCode);
+  }
+
+  if (versionCodes.size > 1) {
+    throw new Error("Bundle OBB files refer to different version codes. Make sure the OBB files belong to the same game version.");
+  }
+
+  const obbRootRelativePath = packageName;
+  const obbFiles = obbEntries
+    .map(entry => {
+      const remoteRelativePath = normalizeRelativePath(entry.relativePath.slice(obbRootRelativePath.length + 1));
+      if (!remoteRelativePath) {
+        throw new Error(`Malformed bundle layout: could not determine OBB relative path for ${entry.relativePath}.`);
+      }
+
+      return {
+        relativePath: entry.relativePath,
+        remoteRelativePath,
+        file: entry.file
+      };
+    })
+    .sort((a, b) => a.remoteRelativePath.localeCompare(b.remoteRelativePath));
+
+  return {
+    packageName,
+    apkFile: apkEntry.file,
+    apkRelativePath: apkEntry.relativePath,
+    obbRootRelativePath,
+    obbFiles,
+    versionCode: versionCodes.size === 1 ? Array.from(versionCodes)[0] : undefined
+  };
+}
+
+async function installObbFolderRecursive(bundle: ResolvedObbBundle): Promise<void> {
+  const remoteTarget = `/sdcard/Android/obb/${bundle.packageName}`;
+  const totalObbBytes = bundle.obbFiles.reduce((sum, entry) => sum + entry.file.size, 0);
+  const obbRange = mapProgressRange(60, 100);
+  let obbBytesDone = 0;
+
+  log(`OBB root path: ${bundle.obbRootRelativePath}`);
+  log(`OBB file count: ${bundle.obbFiles.length}`);
+  log(`Remote target path: ${remoteTarget}`);
+  log(`Deleting target OBB dir: ${remoteTarget}`);
+  setProgress(62);
+  await shell(["rm", "-rf", remoteTarget]);
+
+  log(`Recreating target OBB dir: ${remoteTarget}`);
+  setProgress(66);
+  await shell(["mkdir", "-p", remoteTarget]);
+
+  for (const entry of bundle.obbFiles) {
+    const remotePath = `${remoteTarget}/${entry.remoteRelativePath}`;
+    const remoteDir = remotePath.slice(0, remotePath.lastIndexOf("/"));
+
+    if (remoteDir) {
+      await shell(["mkdir", "-p", remoteDir]);
+    }
+
+    log(`Copying OBB file → ${remotePath} (${entry.file.size} bytes)`);
+    const obbPushLogger = makePercentLogger(`OBB ${entry.remoteRelativePath}`);
+    await pushFileStream(remotePath, entry.file, (sent, total) => {
+      obbPushLogger(sent, total);
+      if (totalObbBytes > 0) {
+        const overallFraction = Math.min((obbBytesDone + sent) / totalObbBytes, 1);
+        obbRange(overallFraction);
+      }
+    });
+    obbBytesDone += entry.file.size;
+  }
+
+  if (totalObbBytes <= 0) {
+    obbRange(1);
+  }
+}
+
 async function installBundle(files: FileList) {
   ensureConnected();
   setProgress(0);
@@ -508,57 +635,49 @@ async function installBundle(files: FileList) {
     || Array.from(map.entries()).find(([k]) => k.endsWith("/release.manifest") || k.endsWith("release.manifest"))?.[1];
 
   let source: BundleSource;
-  let info: ManifestInfo;
+  let bundle: ResolvedObbBundle;
 
-  if (manifestFile) {
-    log(`Reading manifest: ${manifestFile.name}`);
-    const manifestText = await manifestFile.text();
-    source = "manifest";
-    info = parseReleaseManifest(manifestText);
-  } else {
-    log("release.manifest not found; inferring bundle metadata from APK/OBB filenames.");
+  try {
+    log("Resolving APK + OBB bundle from folder layout.");
     source = "inferred";
-    info = inferBundleInfoFromFiles(map);
+    bundle = resolveRookieStyleBundle(files);
+  } catch (inferredError) {
+    if (!manifestFile) throw inferredError;
+
+    log(`Folder-driven bundle resolution failed: ${(inferredError as Error)?.message ?? String(inferredError)}`);
+    log(`Reading manifest fallback: ${manifestFile.name}`);
+    const manifestText = await manifestFile.text();
+    const info = parseReleaseManifest(manifestText);
+    const { apkFile, obbFiles } = resolveBundleFiles(map, info);
+    source = "manifest";
+    bundle = {
+      packageName: info.packageName,
+      apkFile,
+      apkRelativePath: info.apkPath,
+      obbRootRelativePath: info.packageName,
+      obbFiles: obbFiles.map(({ path, file }) => ({
+        relativePath: path,
+        remoteRelativePath: toRemoteRelativePath(path, info.packageName),
+        file
+      })),
+      versionCode: info.versionCode
+    };
   }
 
   setProgress(10);
 
   log(`Bundle source: ${source}`);
-  log(`Bundle package: ${info.packageName}`);
-  log(`Bundle versionCode: ${info.versionCode}`);
-  log(`Bundle APK path: ${info.apkPath}`);
-  log(`Bundle OBB files: ${info.obbPaths.length}`);
-
-  const { apkFile, obbFiles } = resolveBundleFiles(map, info);
+  log(`Resolved package name: ${bundle.packageName}`);
+  if (bundle.versionCode) log(`Resolved versionCode: ${bundle.versionCode}`);
+  log(`Matched APK path: ${bundle.apkRelativePath}`);
+  log(`OBB root path: ${bundle.obbRootRelativePath}`);
+  log(`OBB file count: ${bundle.obbFiles.length}`);
 
   log("---- Installing APK ----");
-  await installApkFile(apkFile, { start: 10, end: 60 });
+  await installApkFile(bundle.apkFile, { start: 10, end: 60 });
 
   log("---- Installing OBB ----");
-  const obbDir = `/sdcard/Android/obb/${info.packageName}`;
-  log(`Ensuring OBB dir: ${obbDir}`);
-  setProgress(65);
-  await shell(["mkdir", "-p", obbDir]);
-
-  let obbBytesDone = 0;
-  const totalObbBytes = obbFiles.reduce((sum, obb) => sum + obb.file.size, 0);
-  const obbRange = mapProgressRange(70, 98);
-
-  for (const { path, file } of obbFiles) {
-    const fileName = basename(path);
-    const remoteObb = `${obbDir}/${fileName}`;
-    log(`Pushing OBB → ${remoteObb} (${file.size} bytes)`);
-
-    const obbPushLogger = makePercentLogger(`OBB ${fileName}`);
-    await pushFileStream(remoteObb, file, (sent, total) => {
-      obbPushLogger(sent, total);
-      if (totalObbBytes > 0) {
-        const overallFraction = Math.min((obbBytesDone + sent) / totalObbBytes, 1);
-        obbRange(overallFraction);
-      }
-    });
-    obbBytesDone += file.size;
-  }
+  await installObbFolderRecursive(bundle);
 
   log("✅ Bundle install completed. Launch the game from Unknown Sources.");
   setProgress(100);
