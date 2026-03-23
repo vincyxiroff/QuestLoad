@@ -320,6 +320,20 @@ type ManifestInfo = {
   obbPaths: string[];
 };
 
+type BundleSource = "manifest" | "inferred";
+
+type BundleFileMatch = {
+  path: string;
+  file: File;
+};
+
+type ParsedObbInfo = {
+  kind: "main" | "patch";
+  versionCode: string;
+  packageName: string;
+  path: string;
+};
+
 function parseReleaseManifest(text: string): ManifestInfo {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
@@ -365,6 +379,86 @@ function parseReleaseManifest(text: string): ManifestInfo {
   return { packageName, versionCode, apkPath, obbPaths };
 }
 
+function parseObbFileName(path: string): ParsedObbInfo | null {
+  const name = basename(path);
+  const match = /^(main|patch)\.(\d+)\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\.obb$/i.exec(name);
+  if (!match) return null;
+
+  return {
+    kind: match[1].toLowerCase() as "main" | "patch",
+    versionCode: match[2],
+    packageName: match[3],
+    path
+  };
+}
+
+function inferBundleInfoFromFiles(map: Map<string, File>): ManifestInfo {
+  const parsedObbs = Array.from(map.entries())
+    .map(([path]) => parseObbFileName(path))
+    .filter((entry): entry is ParsedObbInfo => Boolean(entry));
+
+  if (!parsedObbs.length) {
+    throw new Error(
+      "Bundle is missing valid OBB files. Expected names like main.<versionCode>.<packageName>.obb or patch.<versionCode>.<packageName>.obb."
+    );
+  }
+
+  const packageNames = new Set(parsedObbs.map(entry => entry.packageName));
+  if (packageNames.size !== 1) {
+    throw new Error("Bundle OBB files refer to different package names. Keep all OBB files for the same app in one folder.");
+  }
+
+  const versionCodes = new Set(parsedObbs.map(entry => entry.versionCode));
+  if (versionCodes.size !== 1) {
+    throw new Error("Bundle OBB files refer to different version codes. Make sure the OBB files belong to the same game version.");
+  }
+
+  const seenKinds = new Set<string>();
+  for (const obb of parsedObbs) {
+    if (seenKinds.has(obb.kind)) {
+      throw new Error(`Bundle has multiple ${obb.kind} OBB files. Keep at most one main and one patch OBB per bundle.`);
+    }
+    seenKinds.add(obb.kind);
+  }
+
+  const packageName = parsedObbs[0].packageName;
+  const versionCode = parsedObbs[0].versionCode;
+  const apkCandidates = Array.from(map.entries())
+    .filter(([path]) => path.toLowerCase().endsWith(".apk"))
+    .map(([path, file]) => ({ path, file }));
+
+  if (!apkCandidates.length) {
+    throw new Error(`Bundle is missing an APK. Add ${packageName}.apk at the bundle root or inside the selected folder.`);
+  }
+
+  const exactApkMatches = apkCandidates.filter(({ path }) => basename(path).slice(0, -4) === packageName);
+  let apkPath: string;
+
+  if (exactApkMatches.length === 1) {
+    apkPath = exactApkMatches[0].path;
+  } else if (exactApkMatches.length > 1) {
+    throw new Error(`Bundle has multiple APKs named for ${packageName}. Keep only one obvious APK match in the selected folder.`);
+  } else if (apkCandidates.length === 1) {
+    apkPath = apkCandidates[0].path;
+    log(`⚠️ APK filename does not match inferred package name; using only APK found: ${apkPath}`);
+  } else {
+    throw new Error(
+      `Bundle has multiple APKs and none clearly match ${packageName}. Rename the APK to ${packageName}.apk or remove extra APKs.`
+    );
+  }
+
+  const obbPaths = parsedObbs
+    .sort((a, b) => a.kind.localeCompare(b.kind))
+    .map(entry => entry.path);
+
+  log(`Inferred bundle package: ${packageName}`);
+  log(`Inferred bundle versionCode: ${versionCode}`);
+  log(`Matched APK path: ${apkPath}`);
+  log(`Inferred OBB files: ${obbPaths.length}`);
+
+  return { packageName, versionCode, apkPath, obbPaths };
+}
+
 function buildBundleFileMap(files: FileList): Map<string, File> {
   const map = new Map<string, File>();
 
@@ -389,38 +483,53 @@ function findFileByPathOrSuffix(map: Map<string, File>, manifestPath: string): F
   return null;
 }
 
+function resolveBundleFiles(map: Map<string, File>, info: ManifestInfo): { apkFile: File; obbFiles: BundleFileMatch[] } {
+  const apkFile = findFileByPathOrSuffix(map, info.apkPath);
+  if (!apkFile) throw new Error(`Could not locate APK file from bundle metadata: ${info.apkPath}`);
+
+  const obbFiles: BundleFileMatch[] = [];
+  for (const obbPathRaw of info.obbPaths) {
+    const obbFile = findFileByPathOrSuffix(map, obbPathRaw);
+    if (!obbFile) throw new Error(`Could not locate OBB from bundle metadata: ${obbPathRaw}`);
+    obbFiles.push({ path: obbPathRaw, file: obbFile });
+  }
+
+  return { apkFile, obbFiles };
+}
+
 async function installBundle(files: FileList) {
   ensureConnected();
   setProgress(0);
 
   const map = buildBundleFileMap(files);
-
+  setProgress(5);
   const manifestFile =
     map.get("release.manifest")
     || Array.from(map.entries()).find(([k]) => k.endsWith("/release.manifest") || k.endsWith("release.manifest"))?.[1];
 
-  if (!manifestFile) throw new Error("Bundle folder missing release.manifest");
+  let source: BundleSource;
+  let info: ManifestInfo;
 
-  log(`Reading manifest: ${manifestFile.name}`);
-  setProgress(5);
-  const manifestText = await manifestFile.text();
-  const info = parseReleaseManifest(manifestText);
+  if (manifestFile) {
+    log(`Reading manifest: ${manifestFile.name}`);
+    const manifestText = await manifestFile.text();
+    source = "manifest";
+    info = parseReleaseManifest(manifestText);
+  } else {
+    log("release.manifest not found; inferring bundle metadata from APK/OBB filenames.");
+    source = "inferred";
+    info = inferBundleInfoFromFiles(map);
+  }
+
   setProgress(10);
 
+  log(`Bundle source: ${source}`);
   log(`Bundle package: ${info.packageName}`);
   log(`Bundle versionCode: ${info.versionCode}`);
-  log(`Manifest APK path: ${info.apkPath}`);
-  log(`Manifest OBB files: ${info.obbPaths.length}`);
+  log(`Bundle APK path: ${info.apkPath}`);
+  log(`Bundle OBB files: ${info.obbPaths.length}`);
 
-  const apkFile = findFileByPathOrSuffix(map, info.apkPath);
-  if (!apkFile) throw new Error(`Could not locate APK file from manifest: ${info.apkPath}`);
-
-  const obbFiles: { path: string; file: File }[] = [];
-  for (const obbPathRaw of info.obbPaths) {
-    const obbFile = findFileByPathOrSuffix(map, obbPathRaw);
-    if (!obbFile) throw new Error(`Could not locate OBB from manifest: ${obbPathRaw}`);
-    obbFiles.push({ path: obbPathRaw, file: obbFile });
-  }
+  const { apkFile, obbFiles } = resolveBundleFiles(map, info);
 
   log("---- Installing APK ----");
   await installApkFile(apkFile, { start: 10, end: 60 });
