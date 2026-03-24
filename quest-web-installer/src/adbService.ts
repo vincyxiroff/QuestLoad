@@ -4,7 +4,6 @@ import AdbWebCredentialStore from "@yume-chan/adb-credential-web";
 
 let credentialStore: AdbWebCredentialStore | null = null;
 let deviceManager: AdbDaemonWebUsbDeviceManager | null = null;
-
 let currentAdb: Adb | null = null;
 let currentDevice: AdbDaemonWebUsbDevice | null = null;
 
@@ -18,7 +17,7 @@ async function getCredentialStore(): Promise<AdbWebCredentialStore> {
 }
 
 function getDeviceManager(): AdbDaemonWebUsbDeviceManager {
-  if (!isWebUsbSupported()) throw new Error("WebUSB not supported (use Chrome/Edge).");
+  if (!isWebUsbSupported()) throw new Error("WebUSB not supported.");
   if (!deviceManager) deviceManager = new AdbDaemonWebUsbDeviceManager(navigator.usb);
   return deviceManager;
 }
@@ -67,6 +66,11 @@ export function getCurrentAdb(): Adb | null {
 export async function shell(argv: string[]): Promise<string> {
   if (!currentAdb) throw new Error("No device connected.");
 
+  const allowed = ["getprop", "pm", "rm", "mkdir"];
+  if (!allowed.includes(argv[0])) {
+    throw new Error(`Command ${argv[0]} is restricted.`);
+  }
+
   if (currentAdb.subprocess.shellProtocol) {
     const res = await currentAdb.subprocess.shellProtocol.spawnWaitText(argv);
     return res.stdout;
@@ -84,7 +88,6 @@ export async function pushFileStream(
 
   const total = file.size;
   let sent = 0;
-
   const src = file.stream().getReader();
 
   const stream = new ReadableStream<Uint8Array>({
