@@ -15,7 +15,6 @@
 
 </div>
 
-
 <img width="1030" height="528" alt="Screenshot 2026-02-10 alle 17 50 13" src="https://files.catbox.moe/scqv99.png" />
 
 ## Requirements
@@ -23,8 +22,6 @@
 - Meta Quest headset (2, 3, 3s, Pro)
 - Developer mode enabled on your headset
 - Browser with WebUSB support (Chrome, Edge, ect.)
-
----
 
 ## Quick Start
 
@@ -57,7 +54,8 @@ Click **Install APK** for single APKs or **Install Bundle (APK + OBB)** for bund
 ### 5. Launch the app on your Quest
 After a successful install, go to **Apps → Unknown Sources** on your headset and launch your newly installed app. Once done, you can click **Disconnect** in QuestLoad.
 
----
+## Future updates
+- Ability to export games from the headset
 
 ## For offline usage
 
@@ -69,4 +67,4 @@ cd QuestLoad
 npm install
 npm run dev 
 npm run build    
-npm run preview 
+npm run preview
