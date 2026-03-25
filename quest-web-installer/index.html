@@ -22,6 +22,41 @@
       padding: 24px 16px;
     }
     .wrap { width: min(980px, 100%); }
+    .top-nav {
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+      background: #020202;
+      overflow-x: auto;
+    }
+    .top-nav__item {
+      appearance: none;
+      border: none;
+      border-right: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      text-decoration: none;
+      font: inherit;
+      padding: 12px 16px;
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .top-nav__item:last-child { border-right: none; }
+    .top-nav__item:hover { background: rgba(255, 255, 255, .1); }
+    .top-nav__item:focus-visible {
+      outline: 2px solid #fff;
+      outline-offset: -2px;
+    }
+    .top-nav__item[aria-selected="true"] {
+      background: #fff;
+      color: #000;
+    }
     h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: .03em; }
     .sub { color: var(--muted); font-size: 14px; margin-bottom: 16px; line-height: 1.45; }
     .card { background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
@@ -65,12 +100,39 @@
       background: rgba(255,255,255,0.03); padding: 8px;
     }
     .latest-log div { margin-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px; }
+    [hidden] { display: none !important; }
+    .extractor-view {
+      border: 1px solid var(--border);
+      min-height: 520px;
+      display: grid;
+      place-items: center;
+      background: #030303;
+      text-align: center;
+      padding: 24px;
+    }
+    .extractor-view__coming {
+      font-size: clamp(36px, 9vw, 92px);
+      font-weight: 700;
+      letter-spacing: .15em;
+      line-height: 1;
+    }
+    @media (max-width: 560px) {
+      body { padding: 16px 12px; }
+      .top-nav__item { padding: 10px 12px; }
+      h1 { font-size: 24px; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>QuestLoad</h1>
     <div class="sub">Install apps on Meta Quest devices. Developer mode required. <b>By Frizzle.</b></div>
+    <nav class="top-nav" aria-label="Primary">
+      <button class="top-nav__item" id="installerTab" data-view="installerView" role="tab" aria-selected="true" aria-controls="installerView">Installer</button>
+      <button class="top-nav__item" id="extractorTab" data-view="extractorView" role="tab" aria-selected="false" aria-controls="extractorView">Extractor</button>
+      <a class="top-nav__item" href="https://github.com/FrizzleM/QuestLoad/tree/main" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </nav>
+    <section id="installerView">
     <div class="card">
       <div class="section step-section" id="connectStepSection">
         <div class="title">1. Connection</div>
@@ -107,6 +169,10 @@
         <div class="latest-log" id="latestLog">Ready.</div>
       </div>
     </div>
+    </section>
+    <section id="extractorView" class="extractor-view" hidden>
+      <div class="extractor-view__coming">COMING SOON</div>
+    </section>
   </div>
   <script type="module" src="/src/main.ts"></script>
   <script>
@@ -135,6 +201,37 @@
       apkInput.files = e.dataTransfer.files;
       apkInput.dispatchEvent(new Event('change', { bubbles: true }));
     };
+
+    const tabButtons = Array.from(document.querySelectorAll('.top-nav__item[data-view]'));
+    const views = {
+      installerView: document.getElementById('installerView'),
+      extractorView: document.getElementById('extractorView')
+    };
+
+    const setActiveView = (viewId) => {
+      Object.entries(views).forEach(([id, view]) => {
+        view.hidden = id !== viewId;
+      });
+      tabButtons.forEach((button) => {
+        button.setAttribute('aria-selected', String(button.dataset.view === viewId));
+      });
+    };
+
+    tabButtons.forEach((button) => {
+      button.addEventListener('click', () => setActiveView(button.dataset.view));
+      button.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+        event.preventDefault();
+        const direction = event.key === 'ArrowRight' ? 1 : -1;
+        const currentIndex = tabButtons.indexOf(button);
+        const nextIndex = (currentIndex + direction + tabButtons.length) % tabButtons.length;
+        const nextButton = tabButtons[nextIndex];
+        nextButton.focus();
+        setActiveView(nextButton.dataset.view);
+      });
+    });
+
+    setActiveView('installerView');
   </script>
 </body>
 </html>
