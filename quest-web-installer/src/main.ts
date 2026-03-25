@@ -187,6 +187,6 @@ function resolveBundle(files: FileList) {
       await pushFileStream(remotePath, obb.file);
     }
     setProgress(100);
-    log("✨ Bundle Completed");
+    log("✨ Bundle Completed. You can safely detach your Quest.");
   } catch (e) { logErr(e); }
 };
