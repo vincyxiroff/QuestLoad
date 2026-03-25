@@ -16,15 +16,13 @@
 </div>
 
 
-<img width="1030" height="528" alt="Screenshot 2026-02-10 alle 17 50 13" src="https://github.com/user-attachments/assets/b2a618d7-3f28-44a9-8edc-6b8fe8e051fc" />
-
----
+<img width="1030" height="528" alt="Screenshot 2026-02-10 alle 17 50 13" src="https://files.catbox.moe/scqv99.png" />
 
 ## Requirements
 
-- **Meta Quest headset**
-- **Developer mode enabled** on your headset
-- **Modern browser with WebUSB support** 
+- Meta Quest headset (2, 3, 3s, Pro)
+- Developer mode enabled on your headset
+- Browser with WebUSB support (Chrome, Edge, ect.)
 
 ---
 
@@ -52,9 +50,6 @@ In Step 2, choose an **APK** file or a **bundle folder**:
         └── patch.161562.com.CMGames.IntoTheRadius.obb
     ```
 
-  QuestLoad installs the APK first, then fully replaces `/sdcard/Android/obb/<packageName>` by deleting the existing folder, recreating it, and recursively copying the selected OBB package folder into place.
-
-  Existing `release.manifest` bundles are still accepted as a fallback, but a manifest is no longer required for normal APK + OBB installs. OBB filenames should follow the standard `main|patch.<versionCode>.<packageName>.obb` format.
 
 ### 4. Install
 Click **Install APK** for single APKs or **Install Bundle (APK + OBB)** for bundles. The log will show progress and confirm success when finished.
