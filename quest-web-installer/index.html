@@ -30,6 +30,23 @@
       background: #020202;
       overflow-x: auto;
     }
+    .top-nav__tabs {
+      position: relative;
+      display: flex;
+      min-height: 44px;
+    }
+    .top-nav__indicator {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 0;
+      transform: translateX(0);
+      background: #fff;
+      border-right: 1px solid #000;
+      pointer-events: none;
+      transition: transform .280s cubic-bezier(.22, .61, .36, 1), width .280s cubic-bezier(.22, .61, .36, 1);
+    }
     .top-nav__item {
       appearance: none;
       border: none;
@@ -46,16 +63,30 @@
       cursor: pointer;
       letter-spacing: 0.02em;
       white-space: nowrap;
+      position: relative;
+      z-index: 1;
     }
     .top-nav__item:last-child { border-right: none; }
     .top-nav__item:hover { background: rgba(255, 255, 255, .1); }
+    .top-nav__item[aria-selected="true"]:hover { background: transparent; }
     .top-nav__item:focus-visible {
       outline: 2px solid #fff;
       outline-offset: -2px;
     }
     .top-nav__item[aria-selected="true"] {
-      background: #fff;
       color: #000;
+    }
+    .top-nav__github {
+      margin-left: auto;
+      border-left: 1px solid var(--border);
+      border-right: none;
+      padding-inline: 14px;
+    }
+    .top-nav__github svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+      fill: currentColor;
     }
     h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: .03em; }
     .sub { color: var(--muted); font-size: 14px; margin-bottom: 16px; line-height: 1.45; }
@@ -101,6 +132,22 @@
     }
     .latest-log div { margin-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px; }
     [hidden] { display: none !important; }
+    .tab-content-viewport {
+      overflow: hidden;
+      position: relative;
+    }
+    .tab-content-track {
+      display: flex;
+      width: 200%;
+      transform: translateX(0%);
+      transition: transform .280s cubic-bezier(.22, .61, .36, 1);
+      will-change: transform;
+    }
+    .tab-panel {
+      flex: 0 0 50%;
+      width: 50%;
+      min-width: 0;
+    }
     .extractor-view {
       border: 1px solid var(--border);
       min-height: 520px;
@@ -121,6 +168,12 @@
       .top-nav__item { padding: 10px 12px; }
       h1 { font-size: 24px; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .top-nav__indicator,
+      .tab-content-track {
+        transition: none !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -128,51 +181,62 @@
     <h1>QuestLoad</h1>
     <div class="sub">Install apps on Meta Quest devices. Developer mode required. <b>By Frizzle.</b></div>
     <nav class="top-nav" aria-label="Primary">
-      <button class="top-nav__item" id="installerTab" data-view="installerView" role="tab" aria-selected="true" aria-controls="installerView">Installer</button>
-      <button class="top-nav__item" id="extractorTab" data-view="extractorView" role="tab" aria-selected="false" aria-controls="extractorView">Extractor</button>
-      <a class="top-nav__item" href="https://github.com/FrizzleM/QuestLoad/tree/main" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <div class="top-nav__tabs" id="internalTabs">
+        <div class="top-nav__indicator" id="tabIndicator" aria-hidden="true"></div>
+        <button class="top-nav__item" id="installerTab" data-view="installerView" role="tab" aria-selected="true" aria-controls="installerView">Installer</button>
+        <button class="top-nav__item" id="extractorTab" data-view="extractorView" role="tab" aria-selected="false" aria-controls="extractorView">Extractor</button>
+      </div>
+      <a class="top-nav__item top-nav__github" href="https://github.com/FrizzleM/QuestLoad/tree/main" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M8 0a8 8 0 0 0-2.53 15.59c.4.08.55-.17.55-.38v-1.49c-2.25.49-2.72-.95-2.72-.95-.36-.92-.9-1.16-.9-1.16-.74-.5.06-.49.06-.49.81.06 1.24.83 1.24.83.73 1.22 1.9.88 2.36.67.07-.52.29-.88.52-1.09-1.8-.2-3.69-.88-3.69-3.95 0-.88.32-1.59.83-2.15-.08-.2-.36-1.02.08-2.13 0 0 .68-.21 2.22.82A7.95 7.95 0 0 1 8 4.18c.68 0 1.37.1 2.01.3 1.53-1.03 2.22-.82 2.22-.82.44 1.11.16 1.93.08 2.13.52.56.83 1.27.83 2.15 0 3.08-1.9 3.75-3.7 3.95.3.25.55.74.55 1.5v2.22c0 .21.14.46.55.38A8 8 0 0 0 8 0Z"/>
+        </svg>
+      </a>
     </nav>
-    <section id="installerView">
-    <div class="card">
-      <div class="section step-section" id="connectStepSection">
-        <div class="title">1. Connection</div>
-        <div class="actions">
-          <button id="connect">Connect Quest</button>
-          <button id="disconnect">Disconnect</button>
-        </div>
-      </div>
-      <div class="section section--disabled step-section is-hidden" id="installStepSection">
-        <div class="title">2. Selection</div>
-        <div class="grid">
-          <div class="picker" id="apkPick">
-            <div><strong id="apkLabel">Select APK</strong><span>Drop .apk here</span></div>
-            <div class="tag">APK</div>
-            <input type="file" id="apk" accept=".apk" style="display:none">
+    <div class="tab-content-viewport" id="tabContentViewport">
+      <div class="tab-content-track" id="tabContentTrack">
+        <section id="installerView" class="tab-panel">
+          <div class="card">
+            <div class="section step-section" id="connectStepSection">
+              <div class="title">1. Connection</div>
+              <div class="actions">
+                <button id="connect">Connect Quest</button>
+                <button id="disconnect">Disconnect</button>
+              </div>
+            </div>
+            <div class="section section--disabled step-section is-hidden" id="installStepSection">
+              <div class="title">2. Selection</div>
+              <div class="grid">
+                <div class="picker" id="apkPick">
+                  <div><strong id="apkLabel">Select APK</strong><span>Drop .apk here</span></div>
+                  <div class="tag">APK</div>
+                  <input type="file" id="apk" accept=".apk" style="display:none">
+                </div>
+                <div class="picker" id="bundlePick">
+                  <div><strong id="bundleLabel">Select Bundle</strong><span>Folder with APK + OBB</span></div>
+                  <div class="tag">FOLDER</div>
+                  <input type="file" id="bundle" webkitdirectory multiple style="display:none">
+                </div>
+              </div>
+            </div>
+            <div class="section section--disabled step-section is-hidden" id="installActionsSection">
+              <div class="title">3. Execution</div>
+              <div class="actions">
+                <button id="install">Install APK</button>
+                <button id="installBundle">Install Bundle</button>
+              </div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-head"><span>System Status</span><span id="progressPercent">0%</span></div>
+              <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+              <div class="latest-log" id="latestLog">Ready.</div>
+            </div>
           </div>
-          <div class="picker" id="bundlePick">
-            <div><strong id="bundleLabel">Select Bundle</strong><span>Folder with APK + OBB</span></div>
-            <div class="tag">FOLDER</div>
-            <input type="file" id="bundle" webkitdirectory multiple style="display:none">
-          </div>
-        </div>
-      </div>
-      <div class="section section--disabled step-section is-hidden" id="installActionsSection">
-        <div class="title">3. Execution</div>
-        <div class="actions">
-          <button id="install">Install APK</button>
-          <button id="installBundle">Install Bundle</button>
-        </div>
-      </div>
-      <div class="progress-wrap">
-        <div class="progress-head"><span>System Status</span><span id="progressPercent">0%</span></div>
-        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-        <div class="latest-log" id="latestLog">Ready.</div>
+        </section>
+        <section id="extractorView" class="tab-panel extractor-view">
+          <div class="extractor-view__coming">COMING SOON</div>
+        </section>
       </div>
     </div>
-    </section>
-    <section id="extractorView" class="extractor-view" hidden>
-      <div class="extractor-view__coming">COMING SOON</div>
-    </section>
   </div>
   <script type="module" src="/src/main.ts"></script>
   <script>
@@ -203,19 +267,59 @@
     };
 
     const tabButtons = Array.from(document.querySelectorAll('.top-nav__item[data-view]'));
+    const indicatorEl = document.getElementById('tabIndicator');
+    const contentTrack = document.getElementById('tabContentTrack');
+    const reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     const views = {
       installerView: document.getElementById('installerView'),
       extractorView: document.getElementById('extractorView')
     };
+    const orderedViewIds = ['installerView', 'extractorView'];
+    let activeView = 'installerView';
+    let isAnimating = false;
+
+    const setPanelAccessibility = (viewId) => {
+      Object.entries(views).forEach(([id, view]) => {
+        const isActive = id === viewId;
+        view.setAttribute('aria-hidden', String(!isActive));
+        view.inert = !isActive;
+      });
+    };
+
+    const positionIndicator = () => {
+      const activeButton = tabButtons.find((button) => button.dataset.view === activeView);
+      if (!activeButton || !indicatorEl) return;
+      indicatorEl.style.width = `${activeButton.offsetWidth}px`;
+      indicatorEl.style.transform = `translateX(${activeButton.offsetLeft}px)`;
+    };
 
     const setActiveView = (viewId) => {
-      Object.entries(views).forEach(([id, view]) => {
-        view.hidden = id !== viewId;
-      });
+      if (!viewId || viewId === activeView || isAnimating) return;
+      const nextIndex = orderedViewIds.indexOf(viewId);
+      if (nextIndex < 0 || !contentTrack) return;
+
+      isAnimating = !reduceMotionQuery.matches;
+      activeView = viewId;
       tabButtons.forEach((button) => {
         button.setAttribute('aria-selected', String(button.dataset.view === viewId));
       });
+      positionIndicator();
+      Object.values(views).forEach((view) => { view.inert = true; });
+      contentTrack.style.transform = `translateX(-${nextIndex * 50}%)`;
+
+      if (reduceMotionQuery.matches) {
+        setPanelAccessibility(viewId);
+        isAnimating = false;
+      }
     };
+
+    contentTrack?.addEventListener('transitionend', (event) => {
+      if (event.propertyName !== 'transform' || !isAnimating) return;
+      setPanelAccessibility(activeView);
+      isAnimating = false;
+    });
+
+    window.addEventListener('resize', positionIndicator);
 
     tabButtons.forEach((button) => {
       button.addEventListener('click', () => setActiveView(button.dataset.view));
@@ -231,7 +335,8 @@
       });
     });
 
-    setActiveView('installerView');
+    setPanelAccessibility('installerView');
+    positionIndicator();
   </script>
 </body>
 </html>
